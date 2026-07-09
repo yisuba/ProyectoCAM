@@ -1,0 +1,26 @@
+# ── Entorno virtual ──
+venv/
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── IDE / Editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Build (PyInstaller) ──
+dist/
+build/
+*.spec
+
+# ── Portable (incluido en GitHub) ──
+# portable/ contiene el .exe listo para usar
+
+# ── Sistema operativo ──
+Thumbs.db
+.DS_Store

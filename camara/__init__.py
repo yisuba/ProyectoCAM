@@ -1,0 +1,1 @@
+"""Camera device abstraction layer."""

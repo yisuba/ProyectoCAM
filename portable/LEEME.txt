@@ -1,0 +1,23 @@
+╔══════════════════════════════════════════════════╗
+║   Visor de Cámara — ProyectoPDI — PORTABLE      ║
+╠══════════════════════════════════════════════════╣
+║                                                  ║
+║   ✅ No necesita instalación                     ║
+║   ✅ No necesita Python                          ║
+║   ✅ No necesita OpenCode                        ║
+║   ✅ Solo Windows 10 u 11                        ║
+║                                                  ║
+║   ▶ Doble clic en VisorCamara.exe                ║
+║                                                  ║
+║   📷 Cámaras USB / integradas:                   ║
+║      Presioná "🔍 Detectar"                      ║
+║                                                  ║
+║   🌐 Cámaras IP (ESP32-CAM, etc.):               ║
+║      Presioná "🌐 Red" e ingresá la URL          ║
+║      Ej: http://192.168.1.100:81/stream          ║
+║                                                  ║
+║   🔧 Primer uso: Windows puede pedir             ║
+║      permiso de cámara → aceptar                 ║
+║                                                  ║
+║   📦 Tamaño: ~73 MB                              ║
+╚══════════════════════════════════════════════════╝
