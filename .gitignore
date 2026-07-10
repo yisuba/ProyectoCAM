@@ -18,10 +18,8 @@ dist/
 build/
 *.spec
 
-# ── Portable (incluido en GitHub) ──
-# portable/ contiene el .exe listo para usar
+# ── Portable (generado con build.bat) ──
 portable/*.exe
-!portable/VisorCamara.exe
 
 # ── Configuración local (máquina-específica) ──
 config.json

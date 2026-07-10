@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 _WIN_NAME = "Object Tracking - ProyectoPDI"
 _PANEL_W = 280          # right panel width (px)
-_TRAIL_MAX = 60
+_TRAIL_MAX = 30
 _SLIDER_H = 70          # height per slider row
 
 

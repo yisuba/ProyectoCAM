@@ -133,16 +133,19 @@ El archivo `config.json` (en la raíz) persiste:
 
 Está en `.gitignore` porque es específico de cada máquina.
 
-## Development vs Release mode
+## Standalone .exe (PyInstaller)
 
-**Default: development.** Run code changes via `python main.py` — never build
-the .exe unless the user explicitly asks for a release.
+```bat
+pip install pyinstaller
+build.bat
+```
 
-When the user says **"modo release"**, "build", or "hacé el exe":
-1. Bump version in `VERSION` file (keep it realistic — this is pre-1.0)
-2. Update `CHANGELOG.md`
-3. Run `build.bat`
-4. Commit + push the updated `portable/VisorCamara.exe`
+Output: `dist/VisorCamara.exe` → también copiado a `portable/`.
+Embeds Windows manifest for DPI awareness and camera access.
+
+**El .exe no se sube a GitHub** (binario muy grande). Cada uno lo builda
+localmente. Si se necesita una release oficial, se sube a GitHub Releases
+como asset separado, no en el repo.
 
 **Current version**: `0.x.x`. Not yet 1.0. Versions track functional milestones,
 not just commits.
