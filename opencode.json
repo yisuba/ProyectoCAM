@@ -1,4 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["_asistente-ia/AGENTS.md"]
+  "instructions": ["_dev/AGENTS.md"]
 }

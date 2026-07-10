@@ -1,38 +1,38 @@
 # ProyectoPDI
 
-**Visor de cámara y seguimiento de objetos en tiempo real para Windows.**
+Visor de camara y seguimiento de objetos en tiempo real para Windows.
 
-ProyectoPDI es una aplicación de escritorio que proporciona una vista previa en vivo desde cámaras USB locales, webcams integradas y streams de cámaras IP (ESP32-CAM, RTSP, MJPEG sobre HTTP). Incluye un modo de seguimiento de objetos integrado impulsado por detección YOLO y filtrado de Kalman para seguimiento visual en tiempo real con parámetros ajustables.
-
----
-
-## Características
-
-- **Captura multi-fuente**: cámaras USB, webcams integradas, cámaras IP (RTSP, RTMP, MJPEG sobre HTTP) y archivos de video locales (.mp4, .avi, .mov)
-- **Vista previa en vivo**: interfaz basada en tkinter con detección de dispositivos, selección desplegable y controles de inicio/parada
-- **Seguimiento de objetos**: ventana de análisis OpenCV dedicada con:
-  - Detección YOLO (Ultralytics, dataset COCO, 80 clases)
-  - Filtro de Kalman para suavizado de trayectoria y manejo de oclusiones
-  - Umbral de confianza, ruido de proceso (Q) y ruido de medición (R) ajustables
-  - Visualización de overlays activable/desactivable (Kalman / YOLO de forma independiente)
-  - Longitud de estela configurable para visualización de movimiento
-  - Selector de clases con paginación por teclado
-- **Reproducción de archivos de video**: con bucle automático y limitación a la tasa de cuadros real
-- **Persistencia de ventana**: el tamaño y la posición de la ventana se guardan entre sesiones
-- **Ejecutable portátil**: se puede empaquetar en un único archivo ejecutable
+Aplicacion de escritorio que proporciona vista previa en vivo desde camaras USB, webcams integradas, streams de camaras IP (ESP32-CAM, RTSP, MJPEG sobre HTTP) y archivos de video locales. Incluye un modo de seguimiento de objetos con deteccion YOLO y filtro de Kalman, con parametros ajustables en tiempo real.
 
 ---
 
-## Inicio rápido
+## Caracteristicas
 
-### Desde el código fuente (desarrollo)
+- Captura multi-fuente: camaras USB, webcams, camaras IP (RTSP, RTMP, MJPEG) y archivos de video (.mp4, .avi, .mov)
+- Vista previa en vivo con deteccion automatica de dispositivos
+- Seguimiento de objetos en ventana OpenCV dedicada:
+  - Deteccion YOLO (Ultralytics, dataset COCO, 80 clases)
+  - Filtro de Kalman 2D para suavizado de trayectoria y prediccion ante oclusiones
+  - Umbral de confianza, ruido de proceso (Q) y ruido de medicion (R) ajustables
+  - Visualizacion de overlays activable/desactivable (Kalman / YOLO independientemente)
+  - Longitud de estela configurable para visualizacion de trayectoria
+  - Selector desplegable de clases con paginacion por teclado
+- Reproduccion de video con bucle automatico y limitacion a la tasa de cuadros real
+- Persistencia de tamano y posicion de ventana entre sesiones
+- Ejecutable portatil (build con PyInstaller)
+
+---
+
+## Inicio rapido
+
+### Desde el codigo fuente
 
 ```bat
-setup.bat        # Crea el entorno virtual e instala las dependencias
-run.bat          # Inicia la aplicación
+setup.bat        # Crea el entorno virtual e instala dependencias
+run.bat          # Inicia la aplicacion
 ```
 
-### Instalación manual
+### Instalacion manual
 
 ```bat
 python -m venv venv
@@ -45,146 +45,143 @@ python main.py
 
 - Windows 10 u 11
 - Python 3.13 o superior
-- Una cámara (USB o integrada) **o** la URL de una cámara de red
+- Una camara (USB o integrada) o la URL de una camara de red
 
 ---
 
 ## Uso
 
-### Cámaras locales
+### Camaras locales
 
-1. Haga clic en **🔍 Detectar** para enumerar las cámaras conectadas.
-2. Seleccione un dispositivo en el menú desplegable.
-3. Haga clic en **▶ Iniciar** para comenzar la vista previa.
-4. Haga clic en **⏹ Detener** para finalizar.
+1. Presione el boton Detectar para enumerar las camaras conectadas.
+2. Seleccione un dispositivo en el menu desplegable.
+3. Presione Iniciar para comenzar la vista previa.
+4. Presione Detener para finalizar.
 
-### Cámaras IP / red
+### Camaras IP / red
 
-1. Haga clic en **🌐 Red** en la barra de herramientas.
+1. Presione el boton Red en la barra de herramientas.
 2. Introduzca la URL del stream. Formatos compatibles:
 
 | Tipo | Ejemplo |
 |------|---------|
 | ESP32-CAM (MJPEG) | `http://192.168.1.100:81/stream` |
-| RTSP | `rtsp://usuario:contraseña@cámara:554/stream` |
-| RTMP | `rtmp://…` |
-| MJPEG genérico | `http://…` |
+| RTSP | `rtsp://usuario:contrasena@camara:554/stream` |
+| RTMP | `rtmp://...` |
+| MJPEG generico | `http://...` |
 
-3. Haga clic en **Conectar**. La fuente aparece en el menú desplegable.
-4. Selecciónela y haga clic en **▶ Iniciar**.
+3. Presione Conectar. La fuente aparece en el menu desplegable.
+4. Seleccionela y presione Iniciar.
 
-> **Nota:** Si el ESP32-CAM está flasheado con firmware UVC, se detecta como una cámara USB estándar y no requiere URL.
+> Nota: si el ESP32-CAM esta flasheado con firmware UVC, se detecta como camara USB estandar y no requiere URL.
 
 ### Archivos de video
 
-1. Haga clic en **📁 Video** en la barra de herramientas.
-2. Seleccione un archivo `.mp4`, `.avi` o `.mov`.
-3. El video se reproduce en bucle con reinicio automático del filtro de Kalman en cada ciclo.
+1. Presione el boton Video en la barra de herramientas.
+2. Seleccione un archivo .mp4, .avi o .mov.
+3. El video se reproduce en bucle con reinicio automatico del filtro de Kalman en cada ciclo.
 
 ---
 
 ## Modo de seguimiento de objetos
 
-Con un stream activo, haga clic en **🔬 Analizar** para abrir la ventana de seguimiento. La interfaz tkinter se oculta y se abre una ventana OpenCV con:
+Con un stream activo, presione el boton Analizar para abrir la ventana de seguimiento. La interfaz tkinter se oculta y se abre una ventana OpenCV con el siguiente pipeline por fotograma:
 
-### Pipeline (por fotograma)
-
-1. **Detección YOLO**: detecta la clase objetivo (clase COCO 0 = `person` por defecto)
-2. **Filtro de Kalman**: suaviza la detección, predice la posición durante oclusiones
-3. **Renderizado de overlays**: bounding boxes, puntos centrales y estela de movimiento
+1. Deteccion YOLO: detecta la clase objetivo (clase COCO 0 = persona por defecto)
+2. Filtro de Kalman: suaviza la deteccion y predice la posicion durante oclusiones
+3. Renderizado de overlays: bounding boxes, centros y estela de movimiento
 
 ### Controles
 
-| Tecla | Acción |
+| Tecla | Accion |
 |-------|--------|
-| `ESC` / `Q` | Volver a la interfaz tkinter |
-| `ESPACIO` / `P` | Pausar / reanudar |
-| `N` / `B` | Desplazar páginas del menú de clases |
-| Clic en el nombre de la clase | Abrir menú desplegable de clases |
-| Clic en un elemento del menú | Seleccionar clase de seguimiento |
-| Clic en **Kalman** / **YOLO** del panel | Activar/desactivar overlay |
+| ESC / Q | Volver a la interfaz principal |
+| ESPACIO / P | Pausar / reanudar |
+| N / B | Desplazar paginas del menu de clases |
+| Click en nombre de clase | Abrir menu desplegable de clases |
+| Click en elemento del menu | Seleccionar clase de seguimiento |
+| Click en "Kalman" o "YOLO" | Activar/desactivar overlay |
 
-### Parámetros del panel
+### Parametros del panel
 
-| Control deslizante | Rango | Descripción |
-|--------------------|-------|-------------|
-| Confianza | 0.00 – 1.00 | Umbral mínimo de confianza de YOLO |
-| Q (Proceso) | 0.0 – 10.0 | Ruido de proceso de Kalman (valor alto = adaptación más rápida) |
-| R (Medición) | 0.0 – 20.0 | Ruido de medición de Kalman (valor alto = confía menos en YOLO) |
-| Estela (pts) | 1 – 60 | Longitud de la estela de movimiento en fotogramas |
+| Control | Rango | Descripcion |
+|---------|-------|-------------|
+| Confianza | 0.00 - 1.00 | Umbral minimo de confianza de YOLO |
+| Q (Proceso) | 0.0 - 10.0 | Ruido de proceso de Kalman (mayor = adaptacion mas rapida) |
+| R (Medicion) | 0.0 - 20.0 | Ruido de medicion de Kalman (mayor = confia menos en YOLO) |
+| Estela (pts) | 1 - 60 | Longitud de la estela de movimiento en fotogramas |
 
 ---
 
 ## Estructura del proyecto
 
 ```
-main.py                       Punto de entrada de la aplicación
-│
-├── interfaz/                 Capa de interfaz (tkinter + OpenCV)
-│   ├── app.py                Ventana principal tkinter y barra de herramientas
-│   ├── viewer.py             Renderizado del visor de video
-│   ├── analysis_win.py       Ventana de seguimiento YOLO + Kalman
-│   └── config_manager.py     Persistencia de configuración local
-│
-├── camara/                   Capa de abstracción de cámaras
-│   ├── device.py             Descubrimiento y descriptores de cámaras
-│   ├── stream.py             Captura de fotogramas en segundo plano
-│   └── version.py            Versión de la aplicación
-│
-├── tracker/                  Módulo de seguimiento de objetos
-│   ├── detector.py           Detector YOLO (Ultralytics)
-│   └── kalman.py             Filtro de Kalman 2D (NumPy puro)
-│
-└── _asistente-ia/            Documentación interna del proyecto
+main.py                       Punto de entrada
+|
++-- interfaz/                 Capa de interfaz (tkinter + OpenCV)
+|   +-- app.py                Ventana principal y barra de herramientas
+|   +-- viewer.py             Renderizado del visor de video
+|   +-- analysis_win.py       Ventana de seguimiento YOLO + Kalman
+|   +-- config_manager.py     Persistencia de configuracion local
+|
++-- camara/                   Capa de abstraccion de camaras
+|   +-- device.py             Descubrimiento y descriptores de camaras
+|   +-- stream.py             Captura de fotogramas en segundo plano
+|   +-- version.py            Version de la aplicacion
+|
++-- tracker/                  Modulo de seguimiento de objetos
+|   +-- detector.py           Detector YOLO (Ultralytics)
+|   +-- kalman.py             Filtro de Kalman 2D (NumPy)
+|
++-- _dev/                     Documentacion interna de desarrollo
 ```
 
 ---
 
-## Generación del ejecutable portátil
+## Generacion del ejecutable portatil
 
 ```bat
 pip install pyinstaller
 build.bat
 ```
 
-El ejecutable se genera en `portable/VisorCamara.exe`. Incluye un manifiesto de Windows para la conciencia de DPI y los permisos de acceso a la cámara.
+El ejecutable se genera en `portable/VisorCamara.exe`. Incluye un manifiesto de Windows para DPI awareness y permisos de camara.
 
-> **Nota:** El binario no se incluye en el repositorio. Cada desarrollador lo genera localmente. Para lanzamientos oficiales, el ejecutable se distribuye como un asset de GitHub Releases.
+> El binario no se incluye en el repositorio. Cada desarrollador lo genera localmente. Para lanzamientos oficiales, el ejecutable se distribuye como asset de GitHub Releases.
 
 ---
 
 ## Dependencias
 
-### Tiempo de ejecución (`requirements.txt`)
+### Tiempo de ejecucion (requirements.txt)
 
-- `opencv-python>=5.0` — Captura de video y procesamiento de imágenes
-- `Pillow>=12.0` — Conversión de formatos de imagen
+- `opencv-python>=5.0` — Captura de video y procesamiento de imagenes
+- `Pillow>=12.0` — Conversion de formatos de imagen
 - `numpy>=2.0` — Operaciones con arreglos y datos de imagen
-- `ultralytics>=8.0` — Modelo de detección de objetos YOLO
+- `ultralytics>=8.0` — Modelo de deteccion de objetos YOLO
 
-### Construcción (no incluido en requirements.txt)
+### Construccion (no incluido en requirements.txt)
 
-- `pyinstaller` — Empaquetado del ejecutable portátil
+- `pyinstaller` — Empaquetado del ejecutable portatil
 
 ---
 
-## Solución de problemas
+## Solucion de problemas
 
-### "Cámara detenida" sin imagen
+### La camara no muestra imagen
 
-- Asegúrese de que ninguna otra aplicación esté usando la cámara (Zoom, Teams, navegador, etc.)
-- Reinicie la aplicación
-- Desconecte y vuelva a conectar la cámara USB
-- Verifique la configuración de privacidad de Windows:  
-  Configuración → Privacidad y seguridad → Cámara → permitir aplicaciones de escritorio
+- Verifique que ninguna otra aplicacion este usando la camara (Zoom, Teams, navegador)
+- Reinicie la aplicacion
+- Desconecte y vuelva a conectar la camara USB
+- Verifique la configuracion de privacidad de Windows: Configuracion > Privacidad y seguridad > Camara > permitir aplicaciones de escritorio
 
-### La cámara no se detecta
+### La camara no se detecta
 
-- Pruebe con la aplicación Cámara de Windows para descartar problemas de hardware o controladores
-- Verifique la conexión del cable USB
+- Pruebe con la aplicacion Camara de Windows para descartar problemas de hardware o drivers
+- Verifique la conexion del cable USB
 
 ---
 
 ## Licencia
 
-Este proyecto se proporciona con fines educativos y de investigación.
+Proyecto educativo y de investigacion.
