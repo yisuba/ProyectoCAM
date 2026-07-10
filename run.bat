@@ -14,4 +14,4 @@ if not exist "venv\Scripts\python.exe" (
 
 call venv\Scripts\activate.bat
 python main.py
-pause
+if errorlevel 1 pause

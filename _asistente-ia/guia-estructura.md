@@ -14,18 +14,21 @@ ProyectoPDI/
 ├── camara/                       ← 📷 Capa de abstracción de hardware
 │   ├── __init__.py
 │   ├── device.py                 ←    CameraInfo, list_cameras(), from_url() p/ IP cams
-│   └── stream.py                 ←    CameraStream: source=int|str, hilo separado con buffer
+│   ├── stream.py                 ←    CameraStream: source=int|str, hilo separado con buffer
+│   └── version.py                ←    __version__ leído desde VERSION
 │
 ├── interfaz/                     ← 🖥️ Capa de presentación (tkinter)
 │   ├── __init__.py
 │   ├── app.py                    ←    CameraApp + _UrlDialog para fuentes de red
-│   └── viewer.py                 ←    VideoPreview: renderiza frames BGR→RGB en Canvas
+│   └── viewer.py                 ←    VideoPreview: redimensiona PIL, sin canvas.scale()
 │
 ├── main.py                       ← 🚪 Punto de entrada (crea CameraApp, llama mainloop)
+├── VERSION                       ← 🏷️ Versión actual del proyecto (0.2.0)
+├── CHANGELOG.md                  ← 📋 Historial de cambios por versión
 ├── requirements.txt              ← 📦 Dependencias exactas (pip install -r)
 ├── run.bat                       ← ▶️ Inicia la aplicación (activa venv + python main.py)
 ├── setup.bat                     ← ⚙️  Crea el entorno virtual e instala dependencias
-├── build.bat                     ← 🏗️ Compila .exe standalone con PyInstaller
+├── build.bat                     ← 🏗️ Compila .exe con PyInstaller (usa VERSION)
 ├── visor-camara.manifest         ← 🪟 Windows manifest (DPI awareness, permisos cámara)
 ├── README.md                     ← 📖 Documentación del proyecto
 ├── opencode.json                 ← 🔧 OpenCode descubre las instrucciones acá

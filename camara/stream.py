@@ -8,11 +8,13 @@ Usage::
         # stream.running tells you if it's still alive
 """
 
+import logging
 import os
 import sys
 import time
 import contextlib
 from collections import deque
+from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Optional
 
@@ -29,6 +31,8 @@ except Exception:
 
 import numpy as np
 from numpy.typing import NDArray
+
+logger = logging.getLogger(__name__)
 
 
 @contextlib.contextmanager
@@ -81,6 +85,7 @@ class CameraStream:
         self._error: Optional[str] = None
         self._running = False
         self._frame_count = 0
+        self._looped = False
 
     # ── public helpers ─────────────────────────────────
 
@@ -95,6 +100,14 @@ class CameraStream:
         return self._error
 
     @property
+    def looped(self) -> bool:
+        """True if the video just looped (auto-clears on read)."""
+        with self._lock:
+            val = self._looped
+            self._looped = False
+        return val
+
+    @property
     def index(self) -> int:
         """Local camera index, or -1 for network streams."""
         return self._source if isinstance(self._source, int) else -1
@@ -107,6 +120,11 @@ class CameraStream:
     @property
     def is_network(self) -> bool:
         return isinstance(self._source, str)
+
+    @property
+    def is_video_file(self) -> bool:
+        """True if source is a local video file path."""
+        return isinstance(self._source, str) and Path(self._source).is_file()
 
     @property
     def frame_count(self) -> int:
@@ -191,11 +209,26 @@ class CameraStream:
         # ── capture loop ──────────────────────────────────
         consecutive_errors = 0
 
+        # Read real FPS for video files (to play at correct speed)
+        video_fps = cap.get(cv2.CAP_PROP_FPS) if self.is_video_file else 0.0
+        frame_delay = 1.0 / video_fps if video_fps > 0 else 0.0
+
         while not self._stop_event.is_set():
             try:
                 with _silence_stderr():
                     ret, frame = cap.read()
                 if not ret:
+                    # ── video file loop: restart at EOF ──
+                    if self.is_video_file:
+                        logger.debug("Video ended — looping to frame 0")
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        consecutive_errors = 0
+                        self._frame_count = 0
+                        with self._lock:
+                            self._looped = True
+                        time.sleep(0.05)
+                        continue
+
                     consecutive_errors += 1
                     if consecutive_errors >= self._max_read_errors:
                         self._error = (
@@ -213,6 +246,10 @@ class CameraStream:
 
                 with self._lock:
                     self._queue.append(frame)
+
+                # Throttle to real FPS for video files
+                if frame_delay > 0:
+                    time.sleep(frame_delay)
             except Exception as exc:
                 self._error = str(exc)
                 break

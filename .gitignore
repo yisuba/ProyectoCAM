@@ -20,6 +20,17 @@ build/
 
 # ── Portable (incluido en GitHub) ──
 # portable/ contiene el .exe listo para usar
+portable/*.exe
+!portable/VisorCamara.exe
+
+# ── Configuración local (máquina-específica) ──
+config.json
+
+# ── Pesos de modelos (descarga externa) ──
+*.pt
+
+# ── Logs ──
+logs/
 
 # ── Sistema operativo ──
 Thumbs.db

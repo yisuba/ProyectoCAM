@@ -25,18 +25,30 @@ Python 3.13.3, Windows only. No tests, no linter, no formatter, no CI.
 ## Architecture
 
 ```
-main.py                    ← entrypoint (creates CameraApp, calls mainloop)
-├── interfaz/app.py        ← CameraApp: toolbar, combobox, 🌐 Red button, stream lifecycle
-├── interfaz/viewer.py     ← VideoPreview: BGR→RGB via numpy, renders on Canvas
-├── camara/device.py       ← CameraInfo dataclass, list_cameras(), from_url()
-└── camara/stream.py       ← CameraStream: accepts int (local) or str (URL), background thread
+main.py                    ← entrypoint (env setup + logging)
+│
+├── interfaz/              ← UI layer (tkinter + OpenCV)
+│   ├── app.py             ← CameraApp: toolbar, combobox, botones, stream lifecycle
+│   ├── viewer.py          ← VideoPreview: BGR→RGB via numpy, render en Canvas
+│   ├── analysis_win.py    ← OpenCV window: YOLO + Kalman + trackbars
+│   └── config_manager.py  ← config.json persistencia local
+│
+├── camara/                ← Camera layer
+│   ├── device.py          ← CameraInfo, list_cameras(), from_url()
+│   ├── stream.py          ← CameraStream: int (local) o str (URL), background thread
+│   └── version.py         ← lee VERSION
+│
+└── tracker/               ← Object tracking (nuevo)
+    ├── detector.py        ← YOLO detector (ultralytics)
+    └── kalman.py          ← Filtro de Kalman 2D (numpy puro)
 ```
 
-- `CameraStream.source` is `int | str` — int for local devices, str for URLs (`http://…`, `rtsp://…`).
-- `CameraInfo.from_url(url)` creates a network source descriptor. Clicking "🌐 Red" opens a URL dialog.
-- Resolution is only forced for local cameras (`cap.set()`) — network streams negotiate their own resolution.
-- Warm-up (1s sleep + 5 discards) applies to both local and network sources.
-- The app polls the stream every 30 ms via `tkinter.after()`.
+- `CameraStream.source` es `int | str` — int para local, str para URLs (`http://…`, `rtsp://…`).
+- `CameraInfo.from_url(url)` crea un descriptor de red. El botón "🌐 Red" abre un diálogo de URL.
+- Resolución sólo se fuerza para cámaras locales — las de red negocian solas.
+- Warm-up (1s sleep + 5 descartes) aplica a ambos tipos de fuente.
+- El preview de tkinter polea el stream cada 30 ms con `after()`.
+- **Modo análisis** (`"🔬 Analizar"`) abre una ventana OpenCV separada con su propio loop (cv2.waitKey).
 
 ## Known bug (mostly fixed): "Cámara detenida" with no image
 
@@ -76,6 +88,65 @@ Also works with RTSP (`rtsp://…`) and RTMP (`rtmp://…`) URLs.
 If the ESP32-CAM is flashed as a UVC USB camera, it appears as a normal
 local camera and works with "🔍 Detectar" directly.
 
+## Object Tracking (modo análisis)
+
+Al hacer clic en **"🔬 Analizar"** (con un stream activo), la ventana tkinter se oculta y se abre una ventana OpenCV con:
+
+### Pipeline por frame
+
+1. **Detección (YOLO)**: `tracker/detector.py` usa ultralytics (modelo `yolo11n.pt`) para detectar la clase objetivo (COCO class 0 = persona por defecto).
+   - Devuelve centro [x, y] + bounding box.
+   - Filtrable por **umbral de confianza** (trackbar).
+
+2. **Filtro de Kalman**: `tracker/kalman.py` implementa un filtro 2D con velocidad constante.
+   - **Estado**: [x, y, vx, vy]
+   - **Con detección**: `update()` — corrige la posición con la medición de YOLO.
+   - **Sin detección** (oclusión): `predict()` — estima la posición usando el modelo de velocidad.
+   - Trackbars para ajustar **Q** (ruido de proceso) y **R** (ruido de medición) en vivo.
+
+3. **Visualización**: Bounding box suavizado (verde) + bbox crudo de YOLO (azul) + trail del centro + FPS real.
+
+### Trackbars
+
+| Trackbar | Rango | Efecto |
+|----------|-------|--------|
+| Confianza | 0–100 → 0.00–1.00 | Mínima confianza YOLO para aceptar detección |
+| Q (Proceso) | 0–100 → 0.0–10.0 | Mayor Q = se adapta más rápido a cambios bruscos |
+| R (Medición) | 0–100 → 0.0–20.0 | Mayor R = confía menos en YOLO, más en la predicción |
+
+### Controles
+
+- **ESC / Q**: Cerrar análisis y volver a tkinter.
+- **SPACE / P**: Pausar/reanudar.
+
+### Logger
+
+Todo se registra en `logs/tracker.log` (rotación manual). Si algo falla, revisá ahí
+antes de silenciar/desilenciar OpenCV.
+
+## Configuración local (no se sube a GitHub)
+
+El archivo `config.json` (en la raíz) persiste:
+- Última fuente de cámara usada.
+- Historial de URLs de red.
+- Preferencias de detección (clase objetivo, confianza por defecto).
+
+Está en `.gitignore` porque es específico de cada máquina.
+
+## Development vs Release mode
+
+**Default: development.** Run code changes via `python main.py` — never build
+the .exe unless the user explicitly asks for a release.
+
+When the user says **"modo release"**, "build", or "hacé el exe":
+1. Bump version in `VERSION` file (keep it realistic — this is pre-1.0)
+2. Update `CHANGELOG.md`
+3. Run `build.bat`
+4. Commit + push the updated `portable/VisorCamara.exe`
+
+**Current version**: `0.x.x`. Not yet 1.0. Versions track functional milestones,
+not just commits.
+
 ## Standalone .exe (PyInstaller)
 
 ```bat
@@ -83,8 +154,9 @@ pip install pyinstaller
 build.bat
 ```
 
-Output: `dist/VisorCamara.exe` — single file, no Python needed.
+Output: `dist/VisorCamara.exe` → also copied to `portable/`.
 Embeds Windows manifest for DPI awareness and camera access.
+Built **only** on explicit request.
 
 ## Dependencies
 
@@ -92,6 +164,7 @@ Runtime (`requirements.txt`):
 - `opencv-python==5.0.0.93`
 - `Pillow==12.2.0`
 - `numpy==2.4.4`
+- `ultralytics>=8.0.0`   ← YOLO object detector (~150 MB con pesos)
 
 Build-only (not in requirements.txt):
 - `pyinstaller`
