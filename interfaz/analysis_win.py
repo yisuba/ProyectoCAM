@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Optional
 
 import cv2
 import numpy as np
+import psutil
 
 from tracker.detector import COCO_CLASSES, Detector, Detection
 from tracker.kalman import KalmanFilter
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 _WIN_NAME = "Object Tracking - ProyectoPDI"
 _PANEL_W = 280          # right panel width (px)
 _TRAIL_MAX = 30
-_SLIDER_H = 70          # height per slider row
+_SLIDER_H = 55          # height per slider row
 
 
 # ═══════════════════════════════════════════════════════════
@@ -73,6 +74,23 @@ class AnalysisWindow:
         self._conf = 0.25
         self._q_val = 1.0
         self._r_val = 2.0
+        self._trail_len = 30.0  # trail length in points
+
+        # ── hybrid tracking state ──
+        self._hybrid_mode = True    # True = async, False = continuo
+        self._yolo_interval = 10    # YOLO cada N frames (solo async)
+        self._kcf: Optional["cv2.TrackerKCF"] = None
+        self._kcf_init = False
+        self._frame_idx = 0         # contador de frames para modo async
+        self._track_source = "YOLO"  # YOLO | KCF | PREDICT — para mostrar
+        self._kcf_success = False    # si KCF trackeó bien el último frame
+        self._kcf_bbox: Optional[tuple[int, int, int, int]] = None  # (x, y, w, h) último KCF
+
+        # ── resource metrics ──
+        self._show_metrics = False
+        self._cpu_pct = 0.0
+        self._ram_pct = 0.0
+        self._frame_time_ms = 0.0    # tiempo del último frame procesado
 
         # ── visualisation state ──
         self._trail: list[tuple[int, int]] = []
@@ -84,6 +102,7 @@ class AnalysisWindow:
         # ── toggle flags ──
         self._show_kalman = True
         self._show_yolo = True
+        self._show_kcf = True
 
         # ── drag state ──
         self._drag_idx: Optional[int] = None
@@ -113,9 +132,11 @@ class AnalysisWindow:
 
         self._create_window()
         logger.info(
-            "Analysis started — tracking class %d (%s)",
+            "Analysis started — tracking class %d (%s), mode=%s%s",
             self._detector.target_class,
             self._detector.target_name,
+            "async" if self._hybrid_mode else "continuous",
+            f" (YOLO cada {self._yolo_interval})" if self._hybrid_mode else "",
         )
 
         paused = False
@@ -150,6 +171,16 @@ class AnalysisWindow:
                 elif key in (ord(" "), ord("p"), ord("P")):
                     paused = not paused
                     logger.info("%s", "Paused" if paused else "Resumed")
+                elif key in (ord("c"), ord("C")):
+                    self._hybrid_mode = not self._hybrid_mode
+                    self._frame_idx = 0
+                    # KCF se crea una sola vez por sesion async
+                    self._kcf = None
+                    self._kcf_init = False
+                    logger.info("Mode: %s", f"Async (YOLO cada {self._yolo_interval})" if self._hybrid_mode else "Continuo")
+                elif key in (ord("m"), ord("M")):
+                    self._show_metrics = not self._show_metrics
+                    logger.info("Metrics: %s", "ON" if self._show_metrics else "OFF")
 
                 # ── dropdown open: N/B to page through classes ──
                 elif self._dropdown_open:
@@ -175,34 +206,79 @@ class AnalysisWindow:
     # ── per-frame ─────────────────────────────────────────
 
     def _process_frame(self, frame: np.ndarray) -> None:
-        """Detect → Kalman → compose canvas → imshow."""
-        # Reset Kalman on video loop (position/velocity from previous cycle is garbage)
+        """Hybrid pipeline: decide every frame whether to run YOLO or KCF.
+
+        - Async mode (_hybrid_mode=True): YOLO cada 10 frames, KCF los 9 intermedios.
+        - Continuous mode (_hybrid_mode=False): YOLO en todos los frames (comportamiento clasico).
+        - Kalman se actualiza con la fuente disponible (YOLO, KCF o prediccion autonoma).
+        """
+        t_start = time.perf_counter()
+
+        # Reset Kalman + KCF on video loop
         if self._stream.looped:
-            logger.debug("Video loop detected — resetting Kalman + trail")
+            logger.debug("Video loop detected — resetting Kalman + trail + KCF")
             self._kf = KalmanFilter()
             self._trail.clear()
+            self._kcf_init = False
+            self._kcf = None
 
         self._kf.set_Q(self._q_val)
         self._kf.set_R(self._r_val)
 
-        # detect
-        detections = self._detector.detect(frame, conf_threshold=self._conf)
+        self._frame_idx += 1
+        run_yolo = (not self._hybrid_mode) or (self._frame_idx % self._yolo_interval == 0)
 
-        # Kalman update / predict
         kalman_cx, kalman_cy = 0, 0
         best_det: Optional[Detection] = None
+        self._kcf_success = False
 
-        if detections:
-            best_det = detections[0]
-            cx, cy = best_det.center
-            x1, y1, x2, y2 = best_det.bbox
-            kw, kh = x2 - x1, y2 - y1
-            kalman_cx, kalman_cy = self._kf.update(cx, cy, kw, kh)
-        elif self._kf.is_initialised:
-            kalman_cx, kalman_cy = self._kf.predict()
+        if run_yolo:
+            # ── YOLO detect ──
+            detections = self._detector.detect(frame, conf_threshold=self._conf)
+            if detections:
+                best_det = detections[0]
+                cx, cy = best_det.center
+                x1, y1, x2, y2 = best_det.bbox
+                kw, kh = x2 - x1, y2 - y1
+
+                # Re-init KCF solo en async (en continuo no se usa KCF)
+                if self._hybrid_mode:
+                    self._init_kcf(frame, (x1, y1, kw, kh))
+
+                # Kalman update con YOLO
+                kalman_cx, kalman_cy = self._kf.update(cx, cy, kw, kh)
+                self._track_source = "YOLO"
+            elif self._kf.is_initialised:
+                kalman_cx, kalman_cy = self._kf.predict()
+                self._track_source = "PREDICT"
+        elif self._hybrid_mode:
+            # ── KCF track (frames intermedios en modo async) ──
+            if self._kcf_init:
+                success, bbox = self._kcf.update(frame)
+                self._kcf_success = success
+                if success:
+                    x, y, w, h = [int(v) for v in bbox]
+                    cx, cy = x + w // 2, y + h // 2
+                    kalman_cx, kalman_cy = self._kf.update(cx, cy, w, h)
+                    self._track_source = "KCF"
+                    self._kcf_bbox = (x, y, w, h)
+                elif self._kf.is_initialised:
+                    kalman_cx, kalman_cy = self._kf.predict()
+                    self._track_source = "PREDICT"
+            elif self._kf.is_initialised:
+                kalman_cx, kalman_cy = self._kf.predict()
+                self._track_source = "PREDICT"
 
         # FPS
         self._update_fps()
+
+        # Resource metrics (cada ~10 frames ≈ 3×/seg a 30fps)
+        if self._frame_idx % 10 == 0:
+            self._cpu_pct = psutil.cpu_percent(interval=None)
+            self._ram_pct = psutil.virtual_memory().percent
+
+        # Per-frame processing time
+        self._frame_time_ms = (time.perf_counter() - t_start) * 1000
 
         # draw overlay
         display = frame.copy()
@@ -211,6 +287,16 @@ class AnalysisWindow:
         # compose + show
         canvas = self._build_canvas(display, best_det, (kalman_cx, kalman_cy))
         cv2.imshow(_WIN_NAME, canvas)
+
+    def _init_kcf(self, frame: np.ndarray, bbox_wh: tuple[int, int, int, int]) -> None:
+        """Inicializa KCF UNA SOLA VEZ. Si ya existe, no lo recrea (evita acumulación)."""
+        if self._kcf is not None:
+            return  # ya inicializado — YOLO corrige via Kalman, KCF sigue vivo
+        self._kcf = cv2.TrackerKCF_create()
+        self._kcf.init(frame, bbox_wh)
+        self._kcf_init = True
+        self._kcf_bbox = bbox_wh
+        logger.debug("KCF initialised with bbox %s", bbox_wh)
 
     def _show_static(self, frame: np.ndarray) -> None:
         """When paused, keep showing last canvas."""
@@ -295,9 +381,17 @@ class AnalysisWindow:
                               self._q_val, 0.0, 10.0, "%.1f", (0, 160, 255))
         self._draw_one_slider(canvas, sl, sy0 + 2 * _SLIDER_H, sw, "R (Medicion)",
                               self._r_val, 0.0, 20.0, "%.1f", (255, 120, 0))
+        self._draw_one_slider(canvas, sl, sy0 + 3 * _SLIDER_H, sw, "Estela (pts)",
+                              self._trail_len, 1.0, 60.0, "%.0f", (200, 0, 200))
+
+        # 5th slider: YOLO interval (solo en async mode)
+        if self._hybrid_mode:
+            self._draw_one_slider(canvas, sl, sy0 + 4 * _SLIDER_H, sw, "YOLO cada N",
+                                  self._yolo_interval, 3.0, 20.0, "%.0f", (0, 200, 200))
 
         # ── separator ──
-        sep_y = sy0 + 3 * _SLIDER_H + 8
+        n_sliders = 5 if self._hybrid_mode else 4
+        sep_y = sy0 + n_sliders * _SLIDER_H + 8
         cv2.line(canvas, (px + 15, sep_y), (px + _PANEL_W - 15, sep_y),
                  (60, 60, 60), 1)
 
@@ -317,9 +411,16 @@ class AnalysisWindow:
         cv2.putText(canvas, "YOLO", (px + 34, ly + 27),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, yl_label, 1)
         self._yolo_toggle_rect = (px + 18, ly + 10, px + 100, ly + 34)
+        # KCF (amarillo)
+        kcf_col = (0, 255, 255) if self._show_kcf else (50, 50, 50)
+        kcf_label = (180, 180, 180) if self._show_kcf else (80, 80, 80)
+        cv2.circle(canvas, (px + 22, ly + 44), 5, kcf_col, -1)
+        cv2.putText(canvas, "KCF", (px + 34, ly + 49),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, kcf_label, 1)
+        self._kcf_toggle_rect = (px + 18, ly + 32, px + 100, ly + 56)
 
-        # ── detection status (where FPS was) ──
-        dy = ly + 50
+        # ── detection status ──
+        dy = ly + 72
         if detection:
             txt = f"{self._detector.target_name}  {detection.confidence:.2f}"
             col = (0, 200, 0)
@@ -332,8 +433,23 @@ class AnalysisWindow:
         cv2.putText(canvas, txt, (px + 20, dy),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
 
+        # ── mode indicator ──
+        my = dy + 22
+        mode_txt = f"Async (c/{self._yolo_interval})" if self._hybrid_mode else "Continuo"
+        src_txt = f"Src: {self._track_source}"
+        cv2.putText(canvas, f"Modo: {mode_txt}", (px + 20, my),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
+        cv2.putText(canvas, src_txt, (px + 20, my + 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (140, 140, 140), 1)
+
+        # ── resource metrics (toggleable with M, una linea compacta) ──
+        if self._show_metrics:
+            met_y = my + 36
+            cv2.putText(canvas, f"CPU:{self._cpu_pct:.0f}% RAM:{self._ram_pct:.0f}% {self._frame_time_ms:.0f}ms",
+                        (px + 20, met_y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 200, 255), 1)
+
         # ── class selector (click name + ▼ to open dropdown) ──
-        cy = dy + 28
+        cy = (my + 52) if self._show_metrics else (my + 36)
         cid, cname = self._class_list[self._class_idx]
         name_x = px + 20
         cv2.putText(canvas, cname, (name_x, cy),
@@ -351,7 +467,7 @@ class AnalysisWindow:
 
         # ── controls hint ──
         hy = ch - 55
-        for i, line in enumerate(["ESC: salir", "SPACE: pausa", "N/B: paginar menu"]):
+        for i, line in enumerate(["ESC: salir", "SPACE: pausa", "C: modo continuo/async", "M: recursos", "N/B: paginar menu"]):
             cv2.putText(canvas, line, (px + 20, hy + i * 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (90, 90, 90), 1)
 
@@ -497,7 +613,7 @@ class AnalysisWindow:
 
             # ── check slider thumbs ──
             if pl <= mx <= pr:
-                for idx in range(3):
+                for idx in range(self._n_sliders):
                     sx = pl + 25                        # slider left edge
                     sw = 165                             # slider track width
                     # track_y = sy0 + 30 + idx * _SLIDER_H
@@ -524,6 +640,11 @@ class AnalysisWindow:
                         self._show_yolo = not self._show_yolo
                         logger.info("YOLO overlay %s", "ON" if self._show_yolo else "OFF")
                         return
+                    l, t, r, b = self._kcf_toggle_rect
+                    if l <= mx <= r and t <= my <= b:
+                        self._show_kcf = not self._show_kcf
+                        logger.info("KCF overlay %s", "ON" if self._show_kcf else "OFF")
+                        return
                     # ── check class name → toggle dropdown ──
                     l, t, r, b = self._class_name_rect
                     if l <= mx <= r and t <= my <= b:
@@ -548,7 +669,7 @@ class AnalysisWindow:
             self._drag_idx = None
 
     def _get_val(self, idx: int) -> float:
-        return [self._conf, self._q_val, self._r_val][idx]
+        return [self._conf, self._q_val, self._r_val, self._trail_len, self._yolo_interval][idx]
 
     def _set_val(self, idx: int, v: float) -> None:
         v = max(0.0, v)
@@ -556,12 +677,21 @@ class AnalysisWindow:
             self._conf = min(v, 1.0)
         elif idx == 1:
             self._q_val = v
-        else:
+        elif idx == 2:
             self._r_val = v
+        elif idx == 3:
+            self._trail_len = min(v, 60.0)
+        else:
+            self._yolo_interval = max(3, min(round(v), 20))
 
     @staticmethod
     def _bounds(idx: int) -> tuple[float, float]:
-        return [(0.0, 1.0), (0.0, 10.0), (0.0, 20.0)][idx]
+        return [(0.0, 1.0), (0.0, 10.0), (0.0, 20.0), (1.0, 60.0), (3.0, 20.0)][idx]
+
+    @property
+    def _n_sliders(self) -> int:
+        """5 sliders en async, 4 en continuo."""
+        return 5 if self._hybrid_mode else 4
 
     # ── class cycling ─────────────────────────────────────
 
@@ -621,6 +751,14 @@ class AnalysisWindow:
             cv2.putText(frame, f"YOLO {detection.confidence:.2f}",
                         (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 180, 0), 2)
 
+        # KCF bbox (amarillo, solo en modo async cuando hay bbox)
+        if self._show_kcf and self._kcf_bbox and self._hybrid_mode:
+            kx1, ky1, kw, kh = self._kcf_bbox
+            kx2, ky2 = kx1 + kw, ky1 + kh
+            cv2.rectangle(frame, (kx1, ky1), (kx2, ky2), (0, 255, 255), 2)
+            cv2.putText(frame, "KCF", (kx1, ky2 + 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
         # Centres
         if self._show_kalman and self._kf.is_initialised:
             cv2.circle(frame, (kx, ky), 5, (0, 220, 0), -1)
@@ -628,19 +766,29 @@ class AnalysisWindow:
             mx, my = detection.center
             cv2.circle(frame, (mx, my), 3, (0, 0, 255), -1)
 
-        # Trail
+        # Trail (length ajustable con slider "Estela")
         if self._show_kalman and self._kf.is_initialised:
             self._trail.append((kx, ky))
-            if len(self._trail) > _TRAIL_MAX:
+            max_len = max(1, int(self._trail_len))
+            while len(self._trail) > max_len:
                 self._trail.pop(0)
             for i in range(1, len(self._trail)):
                 alpha = i / len(self._trail)
                 cv2.line(frame, self._trail[i - 1], self._trail[i],
                          (0, int(180 * alpha), 0), 2)
 
-        # FPS on video
-        cv2.putText(frame, f"FPS: {self._fps:.1f}", (10, 28),
+        # FPS + debug info on video (siempre visible)
+        fps_line = f"FPS: {self._fps:.1f}"
+        if self._hybrid_mode and self._track_source == "KCF":
+            fps_line += " [KCF]" if self._kcf_success else " [KCF?]"
+        cv2.putText(frame, fps_line, (10, 28),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+        # Debug: tiempo del frame + fuente
+        dbg = f"{self._frame_time_ms:.0f}ms src={self._track_source}"
+        if self._hybrid_mode:
+            dbg += f" KCFinit={int(self._kcf_init)}"
+        cv2.putText(frame, dbg, (10, 52),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
 
     # ── FPS ───────────────────────────────────────────────
 

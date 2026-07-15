@@ -174,12 +174,21 @@ class CameraApp(tk.Tk):
 
         self._btn_analyze = ttk.Button(
             toolbar,
-            text="🔬 Analizar",
+            text="Object Tracking",
             command=self._start_analysis,
+            width=16,
+            state="disabled",
+        )
+        self._btn_analyze.pack(side=tk.LEFT, padx=(0, 4))
+
+        self._btn_mediapipe = ttk.Button(
+            toolbar,
+            text="🖐️ Pose/Mano",
+            command=self._start_mediapipe,
             width=14,
             state="disabled",
         )
-        self._btn_analyze.pack(side=tk.LEFT, padx=(0, 12))
+        self._btn_mediapipe.pack(side=tk.LEFT, padx=(0, 12))
 
         # ── target class selector ──
         ttk.Label(toolbar, text="Objeto:").pack(side=tk.LEFT, padx=(0, 4))
@@ -332,6 +341,7 @@ class CameraApp(tk.Tk):
         self._stream = stream
         self._btn_toggle.configure(text="⏹ Detener")
         self._btn_analyze.configure(state="normal")
+        self._btn_mediapipe.configure(state="normal")
         self._cam_combo.configure(state="disabled")
         self._btn_refresh.configure(state="disabled")
         self._btn_network.configure(state="disabled")
@@ -352,6 +362,7 @@ class CameraApp(tk.Tk):
         self._viewer.clear()
         self._btn_toggle.configure(text="▶ Iniciar")
         self._btn_analyze.configure(state="disabled")
+        self._btn_mediapipe.configure(state="disabled")
         self._cam_combo.configure(state="readonly")
         self._btn_refresh.configure(state="normal")
         self._btn_network.configure(state="normal")
@@ -457,6 +468,58 @@ class CameraApp(tk.Tk):
             logger.exception("Error durante el análisis")
             messagebox.showerror("Error", "Ocurrió un error durante el análisis.\n"
                                           "Revisá logs/tracker.log para más detalle.")
+        finally:
+            # Stop stream and restore full UI state
+            self._stop_stream()
+            self._save_last_source()
+            self.deiconify()
+
+    # ── MediaPipe analysis mode (Pose + Hands + Kalman) ──
+
+    def _start_mediapipe(self) -> None:
+        """Open OpenCV window with MediaPipe pose/hand tracking.
+
+        The tkinter window is hidden while analysis runs and restored
+        when the user presses ESC.
+        """
+        if self._stream is None:
+            messagebox.showwarning(
+                "Sin stream",
+                "Iniciá la cámara primero con ▶ Iniciar.",
+            )
+            return
+
+        # Stop tkinter poll loop — analysis has its own loop
+        if self._poll_id:
+            self.after_cancel(self._poll_id)
+            self._poll_id = None
+
+        # Hide tkinter window
+        self.withdraw()
+        self.update()
+
+        try:
+            from interfaz.mediapipe_win import MediaPipeWindow
+
+            win = MediaPipeWindow(stream=self._stream)
+            win.run()
+            logger.info("MediaPipe analysis finished normally")
+        except ImportError as exc:
+            if "mediapipe" in str(exc).lower():
+                messagebox.showerror(
+                    "Falta dependencia",
+                    "MediaPipe no está instalado.\n\n"
+                    "Ejecutá en la terminal:\n"
+                    "  pip install mediapipe\n"
+                    "o corré setup.bat de nuevo.",
+                )
+            else:
+                logger.exception("Error al iniciar MediaPipe")
+                messagebox.showerror("Error", str(exc))
+        except Exception:
+            logger.exception("Error durante análisis MediaPipe")
+            messagebox.showerror("Error", "Ocurrió un error durante el análisis.\n"
+                                           "Revisá logs/tracker.log para más detalle.")
         finally:
             # Stop stream and restore full UI state
             self._stop_stream()

@@ -10,13 +10,23 @@ Aplicacion de escritorio que proporciona vista previa en vivo desde camaras USB,
 
 - Captura multi-fuente: camaras USB, webcams, camaras IP (RTSP, RTMP, MJPEG) y archivos de video (.mp4, .avi, .mov)
 - Vista previa en vivo con deteccion automatica de dispositivos
-- Seguimiento de objetos en ventana OpenCV dedicada:
+- Seguimiento de objetos en ventana OpenCV dedicada ("Object Tracking"):
   - Deteccion YOLO (Ultralytics, dataset COCO, 80 clases)
   - Filtro de Kalman 2D para suavizado de trayectoria y prediccion ante oclusiones
+  - Tracking hibrido: modo Continuo (YOLO siempre) o modo Async (YOLO cada N frames + KCF en intermedios)
+  - Frecuencia de YOLO configurable en vivo (cada 3-20 frames) con slider
+  - Bboxes individuales toggleables: Kalman (verde), YOLO (azul), KCF (amarillo)
   - Umbral de confianza, ruido de proceso (Q) y ruido de medicion (R) ajustables
-  - Visualizacion de overlays activable/desactivable (Kalman / YOLO independientemente)
   - Longitud de estela configurable para visualizacion de trayectoria
   - Selector desplegable de clases con paginacion por teclado
+  - Monitor de recursos: CPU, RAM y tiempo por frame (toggle M)
+- Seguimiento de pose y manos con MediaPipe en ventana OpenCV dedicada:
+  - 4 modos de operacion intercambiables en vivo (teclas 1-4)
+  - Estimacion de pose: cuerpo simple (12 pts) o cuerpo completo (17 pts)
+  - Tracking de manos: mano simple (6 pts) o mano completa (21 pts)
+  - Filtro de Kalman individual por landmark con prediccion ante oclusion
+  - Parametros de confianza, Q y R ajustables en tiempo real
+  - Modelos descargados automaticamente en la primera ejecucion
 - Reproduccion de video con bucle automatico y limitacion a la tasa de cuadros real
 - Persistencia de tamano y posicion de ventana entre sesiones
 - Ejecutable portatil (build con PyInstaller)
@@ -83,13 +93,16 @@ python main.py
 
 ---
 
-## Modo de seguimiento de objetos
+## Modo de seguimiento de objetos (Object Tracking)
 
-Con un stream activo, presione el boton Analizar para abrir la ventana de seguimiento. La interfaz tkinter se oculta y se abre una ventana OpenCV con el siguiente pipeline por fotograma:
+Con un stream activo, presione el boton **Object Tracking** para abrir la ventana de seguimiento. La interfaz tkinter se oculta y se abre una ventana OpenCV con tracking hibrido.
 
-1. Deteccion YOLO: detecta la clase objetivo (clase COCO 0 = persona por defecto)
-2. Filtro de Kalman: suaviza la deteccion y predice la posicion durante oclusiones
-3. Renderizado de overlays: bounding boxes, centros y estela de movimiento
+### Pipeline
+
+El sistema soporta dos modos de operacion:
+
+- **Continuo** (tecla C): YOLO se ejecuta en cada fotograma. Maxima precision, menor FPS.
+- **Async** (tecla C, default): YOLO se ejecuta cada N fotogramas (configurable 3-20). Los N-1 fotogramas intermedios usa **KCF** (correlation filter tracker), que es mucho mas rapido. Kalman suaviza la salida de ambas fuentes. Si KCF pierde el objeto, Kalman predice por velocidad.
 
 ### Controles
 
@@ -97,10 +110,12 @@ Con un stream activo, presione el boton Analizar para abrir la ventana de seguim
 |-------|--------|
 | ESC / Q | Volver a la interfaz principal |
 | ESPACIO / P | Pausar / reanudar |
+| **C** | Alternar entre modo Continuo y Async |
+| **M** | Mostrar/ocultar monitor de recursos (CPU, RAM, ms/frame) |
 | N / B | Desplazar paginas del menu de clases |
 | Click en nombre de clase | Abrir menu desplegable de clases |
 | Click en elemento del menu | Seleccionar clase de seguimiento |
-| Click en "Kalman" o "YOLO" | Activar/desactivar overlay |
+| Click en "Kalman", "YOLO" o "KCF" | Activar/desactivar overlay individual |
 
 ### Parametros del panel
 
@@ -110,6 +125,55 @@ Con un stream activo, presione el boton Analizar para abrir la ventana de seguim
 | Q (Proceso) | 0.0 - 10.0 | Ruido de proceso de Kalman (mayor = adaptacion mas rapida) |
 | R (Medicion) | 0.0 - 20.0 | Ruido de medicion de Kalman (mayor = confia menos en YOLO) |
 | Estela (pts) | 1 - 60 | Longitud de la estela de movimiento en fotogramas |
+| YOLO cada N | 3 - 20 | Frecuencia de deteccion YOLO en modo Async (solo visible en ese modo) |
+
+---
+
+## Modo de seguimiento de pose y manos (MediaPipe + Kalman)
+
+Con un stream activo, presione el boton **Pose/Mano** para abrir la ventana de tracking con MediaPipe. La interfaz tkinter se oculta y se abre una ventana OpenCV dedicada.
+
+### Modos de operacion
+
+| Tecla | Modo | Landmarks | Kalman | Descripcion |
+|-------|------|-----------|--------|-------------|
+| **1** | Cuerpo Simple | 12 | 12 | Hombros, codos, munecas, caderas, rodillas, tobillos |
+| **2** | Cuerpo Completo | 17 | 17 | Cuerpo completo estilo COCO (incluye ojos, oidos, nariz) |
+| **3** | Mano Simple | 6 | 6 | Muneca + puntas de los 5 dedos |
+| **4** | Mano Completa | 21 | 21 | Mano completa (21 landmarks anatomicos) |
+
+### Pipeline por fotograma
+
+1. **MediaPipe Tasks API**: ejecuta `PoseLandmarker` o `HandLandmarker` segun el modo
+2. **Filtro de Kalman individual**: cada landmark tiene su propio filtro 2D con velocidad constante
+3. **Prediccion por oclusion**: si un landmark no se detecta, su Kalman estima la posicion por velocidad previa
+4. **Renderizado**: lineas verdes = detectado, lineas amarillas = prediccion
+
+### Controles
+
+| Tecla | Accion |
+|-------|--------|
+| **1-4** | Cambiar modo de operacion |
+| ESC / Q | Volver a la interfaz principal |
+| ESPACIO / P | Pausar / reanudar |
+| Mouse en slider | Ajustar parametro |
+
+### Parametros del panel
+
+| Control | Rango | Descripcion |
+|---------|-------|-------------|
+| Confianza | 0.01 - 1.00 | Umbral minimo de confianza de deteccion de MediaPipe |
+| Q (Proceso) | 0.0 - 10.0 | Ruido de proceso de Kalman (mayor = adaptacion mas rapida) |
+| R (Medicion) | 0.0 - 20.0 | Ruido de medicion de Kalman (mayor = confia menos en MediaPipe) |
+
+### Modelos
+
+Los modelos `.task` de MediaPipe se descargan **automaticamente** desde Google Storage en la primera ejecucion:
+
+- `models/mediapipe/pose_landmarker_lite.task` (~5.6 MB)
+- `models/mediapipe/hand_landmarker.task` (~7.6 MB)
+
+Estan en `.gitignore` porque son binarios externos descargables.
 
 ---
 
@@ -132,6 +196,9 @@ main.py                       Punto de entrada
 +-- tracker/                  Modulo de seguimiento de objetos
 |   +-- detector.py           Detector YOLO (Ultralytics)
 |   +-- kalman.py             Filtro de Kalman 2D (NumPy)
+|   +-- detector_pose_manos.py PoseHandTracker (MediaPipe Tasks API + Kalman)
+|
++-- models/mediapipe/         Modelos .task de MediaPipe (descarga automatica)
 |
 +-- _dev/                     Documentacion interna de desarrollo
 ```
@@ -159,6 +226,9 @@ El ejecutable se genera en `portable/VisorCamara.exe`. Incluye un manifiesto de 
 - `Pillow>=12.0` — Conversion de formatos de imagen
 - `numpy>=2.0` — Operaciones con arreglos y datos de imagen
 - `ultralytics>=8.0` — Modelo de deteccion de objetos YOLO
+- `mediapipe>=0.10.0` — Estimacion de pose y tracking de manos
+
+  > Los modelos `.task` de MediaPipe se descargan automaticamente en `models/mediapipe/` la primera vez que se usa el modo Pose/Mano.
 
 ### Construccion (no incluido en requirements.txt)
 

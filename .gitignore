@@ -26,6 +26,7 @@ config.json
 
 # ── Pesos de modelos (descarga externa) ──
 *.pt
+models/
 
 # ── Logs ──
 logs/

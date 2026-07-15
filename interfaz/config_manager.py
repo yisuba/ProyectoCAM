@@ -29,6 +29,12 @@ _DEFAULT: dict[str, Any] = {
         "default_q": 1.0,
         "default_r": 2.0,
     },
+    "mediapipe": {
+        "default_mode": "CUERPO_SIMPLE",
+        "default_confidence": 0.5,
+        "default_q": 1.0,
+        "default_r": 2.0,
+    },
     "window": {
         "geometry": None,                # "WxH+X+Y" — tkinter geometry string
     },

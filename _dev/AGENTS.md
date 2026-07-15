@@ -31,6 +31,7 @@ main.py                    ← entrypoint (env setup + logging)
 │   ├── app.py             ← CameraApp: toolbar, combobox, botones, stream lifecycle
 │   ├── viewer.py          ← VideoPreview: BGR→RGB via numpy, render en Canvas
 │   ├── analysis_win.py    ← OpenCV window: YOLO + Kalman + trackbars
+│   ├── mediapipe_win.py   ← OpenCV window: MediaPipe Pose/Hands + Kalman + trackbars
 │   └── config_manager.py  ← config.json persistencia local
 │
 ├── camara/                ← Camera layer
@@ -38,9 +39,12 @@ main.py                    ← entrypoint (env setup + logging)
 │   ├── stream.py          ← CameraStream: int (local) o str (URL), background thread
 │   └── version.py         ← lee VERSION
 │
-└── tracker/               ← Object tracking (nuevo)
-    ├── detector.py        ← YOLO detector (ultralytics)
-    └── kalman.py          ← Filtro de Kalman 2D (numpy puro)
+├── tracker/               ← Object tracking
+│   ├── detector.py        ← YOLO detector (ultralytics)
+│   ├── kalman.py          ← Filtro de Kalman 2D (numpy puro)
+│   └── detector_pose_manos.py ← PoseHandTracker (MediaPipe Tasks API + Kalman)
+│
+└── models/mediapipe/      ← Modelos .task de MediaPipe (descarga automática)
 ```
 
 - `CameraStream.source` es `int | str` — int para local, str para URLs (`http://…`, `rtsp://…`).
@@ -49,6 +53,10 @@ main.py                    ← entrypoint (env setup + logging)
 - Warm-up (1s sleep + 5 descartes) aplica a ambos tipos de fuente.
 - El preview de tkinter polea el stream cada 30 ms con `after()`.
 - **Modo análisis** (`"🔬 Analizar"`) abre una ventana OpenCV separada con su propio loop (cv2.waitKey).
+- **Modo pose/manos** (`"🖐️ Pose/Mano"`) abre otra ventana OpenCV separada para MediaPipe.
+- `CameraStream.source` es `int | str` — int para local, str para URLs.
+- `detector_pose_manos.py` usa la **Tasks API** de MediaPipe 0.10.35 (NO la obsoleta `mp.solutions`).
+- Los modelos .task se descargan automáticamente a `models/mediapipe/` en la primera ejecución.
 
 ## Known bug (mostly fixed): "Cámara detenida" with no image
 
@@ -123,6 +131,58 @@ Al hacer clic en **"🔬 Analizar"** (con un stream activo), la ventana tkinter 
 
 Todo se registra en `logs/tracker.log` (rotación manual). Si algo falla, revisá ahí
 antes de silenciar/desilenciar OpenCV.
+
+## Pose / Hand Tracking (modo pose/manos)
+
+Al hacer clic en **"🖐️ Pose/Mano"** (con un stream activo), la ventana tkinter se oculta y se abre una ventana OpenCV con:
+
+### Modos de operación
+
+| Tecla | Modo | Landmarks | Kalman | Descripción |
+|-------|------|-----------|--------|-------------|
+| 1 | CUERPO_SIMPLE | 12 | 12 | Hombros, codos, muñecas, caderas, rodillas, tobillos |
+| 2 | CUERPO_COMPLETO | 17 | 17 | COCO 17 estándar sobre MediaPipe |
+| 3 | MANO_SIMPLE | 6 | 6 | Muñeca + 5 puntas de dedos |
+| 4 | MANO_COMPLETA | 21 | 21 | Mano completa (21 landmarks) |
+
+### Pipeline por frame
+
+1. **MediaPipe Tasks API**: `PoseLandmarker` o `HandLandmarker` según el modo.
+2. **Extracción selectiva**: solo los landmarks del modo activo (sub-muestreo para modos simples).
+3. **Kalman por landmark**: cada landmark tiene su propio `KalmanFilter` (2D, velocidad constante).
+   - Con detección → `update()` corrige la posición
+   - Sin detección (oclusión) → `predict()` estima por velocidad previa
+4. **Dibujo**: líneas verdes (detectado) o amarillas (predicción).
+
+### State machine
+
+`PoseHandTracker.set_mode(mode)`:
+1. Destruye el arreglo anterior de Kalman (`self._kfs.clear()`).
+2. Crea nuevos Kalman según la cantidad de landmarks del modo.
+3. Recrea el modelo MediaPipe correspondiente (libera el anterior).
+4. Resetea flags de detección y posiciones suavizadas.
+
+### Parámetros (trackbars)
+
+| Trackbar | Rango | Efecto |
+|----------|-------|--------|
+| Confianza | 0.01–1.00 | `min_detection_confidence` de MediaPipe |
+| Q (Proceso) | 0.0–10.0 | Mayor Q = Kalman se adapta más rápido |
+| R (Medición) | 0.0–20.0 | Mayor R = Kalman confía menos en MediaPipe |
+
+### Controles
+
+- **1 / 2 / 3 / 4**: Cambiar modo en vivo (recrea Kalman automáticamente).
+- **ESC / Q**: Cerrar y volver a tkinter.
+- **SPACE / P**: Pausar/reanudar.
+
+### Modelos
+
+Se descargan automáticamente desde Google Storage a `models/mediapipe/`:
+- `pose_landmarker_lite.task` (~5.6 MB)
+- `hand_landmarker.task` (~7.6 MB)
+
+Usan la Tasks API de MediaPipe (NO la vieja `mp.solutions` que ya no existe en 0.10.35+).
 
 ## Configuración local (no se sube a GitHub)
 
